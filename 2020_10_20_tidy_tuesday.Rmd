@@ -1,0 +1,212 @@
+---
+title: "2020_10_20_tidy_tuesday.R"
+output: html_document
+---
+
+```{r, echo=FALSE, message=FALSE}
+library(tidyverse)
+library(tidytuesdayR)
+
+library(ggrepel)
+
+```
+So I start by importing the data using the code provided by TidyTuesday.
+```{r}
+# Get the Data
+# Read in with tidytuesdayR package 
+
+tuesdata <- tidytuesdayR::tt_load('2020-10-20')
+
+beer_awards <- tuesdata$beer_awards
+beer_awards 
+```
+
+I then check the range of year covered by the dataset.
+
+```{r}
+beer_awards %>% 
+  summarise(year_min = min(year),
+            year_max = max(year)
+            )
+```
+Quickly looking to see if, and how NA values are used in the dataset. There aren't any NAs. 
+
+```{r}
+beer_awards %>% 
+  map(~ sum(is.na(.)))
+```
+
+I decided to take a look at the medals won by state.
+
+```{r}
+state_wins <- beer_awards %>% 
+  group_by(state) %>% 
+  summarise(wins = n()) %>%
+  mutate(prop_wins = wins / sum(wins)) %>% 
+  
+  ungroup()
+
+state_wins
+```
+
+Then visualizing the distribution of number of medals won by each state (over the period 1987 - 2020). The paired histogram and box plot, show a couple of interesting outliers (i.e. state that have won very large numbers of medals)
+
+```{r}
+
+format_hist_box_pair_plot <- function(x_lims){
+  list(scale_x_continuous(limits= x_lims), 
+       theme_minimal()
+  )
+}
+
+hist_box_pair_plot <- function(df, x_var, x_lims = c(0, 1000), x_label, y_label,
+                               colour = "grey40", ...){
+  
+  histogram <- ggplot(data = df,
+                      mapping = aes_string(x = x_var))
+  
+  histogram <- histogram + geom_histogram(fill = colour, bins = 50) +
+    
+    labs(x = NULL, y = y_label) +
+    format_hist_box_pair_plot(x_lims)
+  
+  box_plot <- ggplot(data = df,
+                     mapping = aes_string(x = x_var))
+  
+  box_plot <- box_plot + geom_boxplot(colour = colour) +
+    
+    scale_y_continuous(labels = NULL) +
+    labs(x = x_label) +
+    format_hist_box_pair_plot(x_lims)
+  
+  #combine and align the histogram and box plot
+  cowplot::plot_grid(histogram, box_plot,
+                     ncol = 1, rel_heights = c(3, 1),
+                     align = 'v', axis = 'lr')
+}
+
+n_max <- max(state_wins$wins) * 1.1
+
+hist_box_pair_plot(df = state_wins, x_var = "wins", x_lims = c(0, n_max), x_label = "Number of medals won (1987 - 2000)", y_label = "Number of states")
+```
+Sorting the `state_wins` dataframe shows that California has the most wins.
+
+```{r}
+state_wins %>% 
+  arrange(desc(wins))
+```
+
+So, I decided to take a look at the data for California in more detail.
+
+```{r}
+CA_awards <- beer_awards %>% 
+  filter(state == "CA")
+
+CA_awards
+```
+Looking at the distribution of medals wins at the next level down of granularity (the city).
+```{r}
+CA_city_wins <- CA_awards %>% 
+  group_by(city) %>% 
+  summarise(wins = n()) %>% 
+  ungroup() %>% 
+  mutate(log_wins = log10(wins))
+
+CA_city_wins
+```
+
+Plotting the distribution of meal wins by city produces a paired boxplot-histogram a distribution that looks very similar to the plot of state wins.
+
+```{r}
+hist_box_pair_plot(df = CA_city_wins, x_var = "wins", x_lims = c(0, 100), x_label = "Number of medals won (1987 - 2000)", y_label = "Number of cities")
+```
+Given the heavy right skew of the distribution, I thought it was worth plotting on a log axis. Although this didn't add any particular insight.
+
+```{r}
+hist_box_pair_plot(df = CA_city_wins, x_var = "log_wins", x_lims = c(0, 2.5), x_label = "Log(Number of medals won (1987 - 2000))", y_label = "Number of cities")
+```
+The interesting outlier on the right of the plot with 86 wins is San Diego.
+```{r}
+CA_city_wins %>% 
+  arrange(desc(wins))
+```
+
+So, I thought it would be interesting to conclude this quick EDA by looking at the how the number of medals won over time had varied for the most successful state (California) and the most successful city within that state (San Diego)
+
+```{r}
+SD_awards <- beer_awards %>% 
+  filter (city == "San Diego")
+
+SD_awards
+```
+Plotting the medals won by breweries in California over time. 
+
+```{r}
+
+plot_medals_by_year <- function(df, title, caption){
+  gsb_colours <- c("gold", "#999999", "#CC9900")
+  medal_levels_ordered <- c("Gold", "Silver", "Bronze")
+  
+  df %>%
+    group_by(year, medal) %>% 
+    summarise(wins = n()) %>% 
+    ungroup () %>% 
+    
+    ggplot(mapping = (aes(x = year, y = wins, 
+                          colour = factor(medal, level = medal_levels_ordered)
+                          )
+                      )
+           ) +
+    geom_line(size = 1.5) + 
+    
+    scale_color_manual(values = gsb_colours) +
+    
+    guides(colour = FALSE) +
+    
+    facet_wrap(~factor(medal, level = medal_levels_ordered), ncol = 1) +
+    
+    labs(title = title, caption = caption,
+         x = "",
+         y = "Number of medals won") +
+    
+    theme_minimal()
+}
+
+p_title = "Medals won at the Great American Beer Festival by Breweries in California"
+p_caption = "Source: https://www.greatamericanbeerfestival.com/the-competition/winners/"
+p <- plot_medals_by_year(df = CA_awards, title = p_title, caption = p_caption)
+p
+
+ggsave(filename = "California_wins_at_GABF.png")
+
+
+# gsb_colours <- c("gold", "#999999", "#CC9900")
+# medal_levels_ordered <- c("Gold", "Silver", "Bronze")
+# 
+# CA_awards %>%
+#   group_by(year, medal) %>% 
+#   summarise(wins = n()) %>% 
+#   ungroup () %>% 
+#   
+#   ggplot(mapping = (aes(x = year, y = wins, 
+#                         colour = factor(medal, level = medal_levels_ordered)
+#                         )
+#                     )
+#          ) +
+#   geom_line(size = 1.5) + 
+#   
+#   scale_color_manual(values = gsb_colours) +
+#   
+#   guides(colour = FALSE) +
+#   
+#   facet_wrap(~factor(medal, level = medal_levels_ordered), ncol = 1) +
+#   
+#   theme_minimal()
+
+```
+```{r}
+p_title = "Medals won at the Great American Beer Festival by Breweries in San Diego"
+p_caption = "Source: https://www.greatamericanbeerfestival.com/the-competition/winners/"
+plot_medals_by_year(df = SD_awards, title = p_title, caption = p_caption)
+```
+
